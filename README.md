@@ -1,2 +1,2 @@
 # computer_vision_traditional
-Repo for traditional Computer Vision (non Deep Learning) implementations
+Repo for classical Computer Vision (non Deep Learning) implementations
