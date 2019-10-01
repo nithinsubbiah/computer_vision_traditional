@@ -93,13 +93,12 @@ def rectifyImage(img, debug, img_name):
             x = np.insert(x, 2, 1, axis = 1)
             pts.append(x)
             plt.close()
-        
-        np.savez('saved_points.npz', **{img_name: pts})
+
+        np.savez('./data/{}.npz'.format(img_name), **{img_name: pts})
 
     if not debug:
         
-        points = np.load('saved_points.npz')
-
+        points = np.load('./data/{}.npz'.format(img_name))
         Ha = affine_rectification(points[img_name])
         h, w, _ = img.shape
 
@@ -111,12 +110,6 @@ def rectifyImage(img, debug, img_name):
         max_h, max_w, _ = np.max(edge_coords_matrix, axis = 1)
         min_h, min_w, _ = np.min(edge_coords_matrix, axis = 1)
         
-        # H_translate = np.eye(2)
-        # H_translate = np.append(H_translate, [[0,0]], axis = 0)
-        # translation = np.array([[-min_h], [-min_w], [1]])
-        # H_translate = np.append(H_translate, translation, axis = 1)
-        # affine_img = cv2.warpPerspective(img, np.dot(H_translate, Ha), (int(max_h - min_h), int(max_w-min_w)))
-        # affine_img = cv2.warpPerspective(img, np.dot(H_translate, Ha), (int(frame_size), int(frame_size)))
         affine_img = cv2.warpPerspective(img, Ha, (int(max_h - min_h), int(max_w - min_w)))
         
         plt.imshow(affine_img)
@@ -143,7 +136,7 @@ def main():
     # for img in images:
     img_name = images[2].split('/')[-1]
     img = imread(images[2])
-    rectifyImage(img, 1, img_name)
+    # rectifyImage(img, 1, img_name)
     rectifyImage(img, 0, img_name)
 
 
