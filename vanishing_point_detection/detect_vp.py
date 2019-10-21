@@ -46,6 +46,7 @@ def show_clusters(image, clusters, points=None, show_point=False):
     # Unique color for each cluster. (BGR)
     #Assuming only five clusters are formed
     line_color = [(255,0,0), (0,255,0), (0,0,255), (0,255,255), (255,255,0)]
+    VP = points
 
     for idx, cluster in enumerate(clusters):
         
@@ -56,8 +57,6 @@ def show_clusters(image, clusters, points=None, show_point=False):
     plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
     if show_point:
-        VP = np.array(points)
-        VP = np.transpose(VP.T/VP[:,-1])
         
         # Point colors corresponding to that of lines
         point_colors = ['b', 'g', 'r', 'y', 'c']
@@ -69,7 +68,17 @@ def show_clusters(image, clusters, points=None, show_point=False):
 
 
 def RANSAC(cluster, iterations=5000, threshold=0.35):
-    
+    '''
+    Input: 1. Cluster of lines
+           2. Optional: No. of iterations
+           3. Optional: Threshold value for inliers
+
+    Output: 1. Vanishing points
+            2. New cluster
+
+    Description: Performs RANSAC on each cluster to find its Vanishing Point
+                 and using that point to remove the outliers.
+    '''
     max_inliers = 0
     best_VP = None
 
@@ -111,6 +120,16 @@ def RANSAC(cluster, iterations=5000, threshold=0.35):
 
 def find_VP(clusters):
 
+    '''
+    Input: List of list of line clusters
+
+    Output: 1. New clusters after removing the outliers
+            2. Vanishing points of the clusters
+
+    Description: Removes outlier lines from the cluster of lines and finds
+                 Vanishing Point using RANSAC
+    '''
+
     # Combining the bins with angle ranges (-90,-72) and (72,90)
     clusters[0] = np.concatenate((clusters[0], clusters[-1]))
     del clusters[-1]
@@ -119,7 +138,6 @@ def find_VP(clusters):
     VPs = []
     
     for cluster in clusters:
-        
         # Discard the clusters that are too small
         if len(cluster) < 10:
             continue
@@ -127,15 +145,19 @@ def find_VP(clusters):
         VPs.append(VP)
         new_clusters.append(new_cluster)
     
+    VPs = np.array(VPs)
+    VPs = np.transpose(VPs.T/VPs[:,-1])    
+    
     return new_clusters, VPs
 
 def main():
+
     img_folder = '/home/nithin/Desktop/Geometry Vision/Assignments/HW2/images/input'
     lines_folder = '/home/nithin/Desktop/Geometry Vision/Assignments/HW2/images/lines'
 
     images = glob.glob(img_folder+'/*')
 
-    image = images[1]
+    image = images[-5]
     img = cv2.imread(image)
 
     img_name = (image.split('/')[-1]).split('.')[0]
