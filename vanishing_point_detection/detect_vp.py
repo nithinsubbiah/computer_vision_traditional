@@ -17,7 +17,6 @@ def cluster_lines(lines, bin_size=10):
     sorted_idx = np.argsort(theta)
     theta = np.sort(theta)
     histogram_values, bin_edges = np.histogram(theta, bins=bin_size, range=(-np.pi/2,np.pi/2))
-
     sorted_lines = lines[sorted_idx]
 
     clusters = []
@@ -82,7 +81,7 @@ def RANSAC(cluster, iterations=5000, threshold=0.35):
     max_inliers = 0
     best_VP = None
 
-    print("Running RANSAC...")
+    print("Finding the Vanishing Point...\n")
 
     for i in range(iterations):
         num_inliers = 0
@@ -105,7 +104,7 @@ def RANSAC(cluster, iterations=5000, threshold=0.35):
             max_inliers = num_inliers
             best_VP = VP
     
-    print("RANSAC complete")
+    print("Vanishing Point found\n")
 
     new_cluster = []
 
@@ -147,7 +146,7 @@ def find_VP(clusters):
     
     VPs = np.array(VPs)
     VPs = np.transpose(VPs.T/VPs[:,-1])    
-    
+
     return new_clusters, VPs
 
 def main():
