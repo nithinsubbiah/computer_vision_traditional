@@ -72,7 +72,7 @@ def feature_matching(img1, img2, show_matches=False):
 
     good_matches = []
     for m,n in matches:
-        if m.distance < 0.75*n.distance:
+        if m.distance < 0.9*n.distance:
             good_matches.append(m)
 
     pts1 = []
@@ -83,7 +83,8 @@ def feature_matching(img1, img2, show_matches=False):
         pts2.append(kp2[match.trainIdx].pt)
     
     if show_matches:
-        img3 = cv2.drawMatchesKnn(img1,kp1,img2,kp2,good,None,flags=2)
+        img3 = cv2.drawMatches(img1, kp1, img2, kp2, good_matches, None, flags=2)
+        # img3 = cv2.drawMatchesKnn(img1, kp1, img2, kp2, good_matches, None, flags=2)
         plt.imshow(cv2.cvtColor(img3, cv2.COLOR_BGR2RGB))
         plt.show()
     
@@ -200,7 +201,7 @@ def compute_H(p1, p2):
 
     return H2to1
 
-def plane_RANSAC(pts1, pts2, iterations=50, tolerance=1):
+def plane_RANSAC(pts1, pts2, mask, iterations=5000, tolerance=4.5):
     '''
     Inputs: 1. pts1, pts2 - two sets of corrsponding matches in each image
             2. iterations - number of iterations to run RANSAC
@@ -212,8 +213,6 @@ def plane_RANSAC(pts1, pts2, iterations=50, tolerance=1):
     '''
     bestH = None
     max_inliers = 0
-
-    print("Extracting planes from images...\n")
 
     for i in range(iterations):
 
@@ -236,10 +235,13 @@ def plane_RANSAC(pts1, pts2, iterations=50, tolerance=1):
         if(num_inliers > max_inliers):
             pts1_inliers = np.squeeze(pts1[np.argwhere(error < tolerance)])
             pts2_inliers = np.squeeze(pts2[np.argwhere(error < tolerance)])
+            inlier_idx = np.argwhere(error < tolerance).reshape(-1)
             bestH = H
             max_inliers = num_inliers
 
-    return bestH, pts1_inliers, pts2_inliers
+    mask[inlier_idx] = False
+
+    return bestH, pts1_inliers, pts2_inliers, mask
 
 def extract_planes(img1, img2):
     '''
@@ -247,38 +249,67 @@ def extract_planes(img1, img2):
 
     Output:
 
-    Description: Extracts the homography of the common planes between two images
+    Description: Extracts the homography and inliners of the planes in two images
                  using RANSAC
     '''
     
     pts1, pts2 = feature_matching(img1, img2)
 
+    pts1_c = deepcopy(pts1)
+    pts2_c = deepcopy(pts2)
+
     H_matrices = []
     pts1_inliers_list = []
     pts2_inliers_list = []
+    plane_size_list = []
 
     all_planes_extracted = False
-    plane_threshold = 4           # Number of inlier points to be considered as a plane
+    extraction_threshold = 30      # Minimum number of points needed to continue plane extraction 
+
+    # Mask to remove inliners from the next iteration
+    # True - Use the corresponding index, False - Do not use the corresponding index
+    mask = np.full(len(pts1_c), True)
+
+    print("Extracting planes from images...\n")
 
     while not all_planes_extracted:
         
-        H, pts1_inliers, pts2_inliers = plane_RANSAC(pts1, pts2)
+        H, pts1_inliers, pts2_inliers, mask = plane_RANSAC(pts1_c, pts2_c, mask)
 
-        if len(pts1_inliers) < plane_threshold:
-            all_planes_extracted = True
-        else:
-            H_matrices.append(H)
-            pts1_inliers_list.append(pts1_inliers)
-            pts2_inliers_list.append(pts2_inliers)
-            ####I need to remove the inliers from pts1 and pts2
+        plane_size_list.append(len(pts1_inliers))
 
-    num_planes = len(H)
+        pts1_c = np.squeeze(pts1_c[np.argwhere(mask)])
+        pts2_c = np.squeeze(pts2_c[np.argwhere(mask)])
+
+        mask = np.full(len(pts1_c), True)
+
+        H_matrices.append(H)
+        pts1_inliers_list.append(pts1_inliers)
+        pts2_inliers_list.append(pts2_inliers)
+        
+        if len(mask) < extraction_threshold:
+            all_planes_extracted = True 
+
+    num_planes = len(H_matrices)
 
     print("{} planes extracted\n".format(num_planes))
 
-    import pdb;pdb.set_trace()
+    plane_size_list = np.array(plane_size_list)
 
+    top_idx = np.argsort(-plane_size_list)[:2]
 
+    for idx in top_idx:
+
+        plt.imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
+        for point in pts1_inliers_list[idx]:
+            plt.scatter(int(point[0]), int(point[1]), c='b')
+        plt.show()
+
+        plt.imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
+        for point in pts2_inliers_list[idx]:
+            plt.scatter(int(point[0]), int(point[1]), c='b')
+        plt.show()
+    
 def main():
 
     img_folder = '/home/nithin/Desktop/Geometry Vision/Assignments/HW2/images/input'
