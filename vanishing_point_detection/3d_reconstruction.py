@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import sys
 from mpl_toolkits.mplot3d import Axes3D
 from copy import deepcopy
+from scipy.spatial import ConvexHull
 
 from detect_vp import cluster_lines, find_VP, show_clusters
 from camera_properties import eightpoint, sevenpoint, essentialMatrix, triangulate, epipolarCorrespondence
@@ -59,7 +60,7 @@ def intrinsics_calibration(points):
 # This function is adapted from OpenCV tutorials
 def feature_matching(img1, img2, show_matches=False):
     
-    sift = cv2.xfeatures2d.SIFT_create(400)
+    sift = cv2.xfeatures2d.SIFT_create()
 
     # find the keypoints and descriptors with SIFT
     kp1, des1 = sift.detectAndCompute(img1,None)
@@ -72,7 +73,7 @@ def feature_matching(img1, img2, show_matches=False):
 
     good_matches = []
     for m,n in matches:
-        if m.distance < 0.9*n.distance:
+        if m.distance < 0.6*n.distance:
             good_matches.append(m)
 
     pts1 = []
@@ -105,7 +106,7 @@ def find_E(F, K1, K2):
     
     return E
 
-def find_best_C2(C2s):
+def find_best_C2(pts1, pts2, C2s, K2, M1):
 
     C_idx = None
     min_error = sys.maxsize
@@ -142,11 +143,11 @@ def extrinsic_calibration(img1, img2, K1, K2):
                  by obtaining matching points and triangulation 
     '''
 
-    pts1, pts2 = feature_matching(img1, img2)
+    pts1, pts2 = feature_matching(img1, img2, show_matches=False)
 
     M = max(img1.shape[0], img1.shape[1])
     F = find_F(pts1, pts2, M)
-    hp.displayEpipolarF(img1,img2,F)
+    # hp.displayEpipolarF(img1,img2,F)
 
     E = find_E(F, K1, K2)
 
@@ -154,12 +155,12 @@ def extrinsic_calibration(img1, img2, K1, K2):
     M1 = np.dot(K1,C1)
     C2s = hp.camera2(E)
 
-    C2 = find_best_C2(C2s)
+    C2 = find_best_C2(pts1, pts2, C2s, K2, M1)
 
     M2 = np.dot(K2,C2)
-    pts_3D, error = triangulate(M1, pts1, M2, pts2)
+    # pts_3D, error = triangulate(M1, pts1, M2, pts2)
 
-    plot_3D_points(pts_3D)
+    # plot_3D_points(pts_3D)
 
     return M1, M2
 
@@ -201,7 +202,7 @@ def compute_H(p1, p2):
 
     return H2to1
 
-def plane_RANSAC(pts1, pts2, mask, iterations=5000, tolerance=4.5):
+def plane_RANSAC(pts1, pts2, mask, iterations=10000, tolerance=1.5):
     '''
     Inputs: 1. pts1, pts2 - two sets of corrsponding matches in each image
             2. iterations - number of iterations to run RANSAC
@@ -243,24 +244,26 @@ def plane_RANSAC(pts1, pts2, mask, iterations=5000, tolerance=4.5):
 
     return bestH, pts1_inliers, pts2_inliers, mask
 
-def extract_planes(img1, img2):
+def extract_plane_points(img1, img2, show_extraction=False):
     '''
     Input: Two images
 
-    Output:
-
+    Output: 1. H_matrices - Homography matrices from one plane to the other
+               in the image
+            2. pts1_inliers_list, pts2_inliers_list - Inliner points for each
+               planes in the two images 
+               
     Description: Extracts the homography and inliners of the planes in two images
                  using RANSAC
     '''
     
-    pts1, pts2 = feature_matching(img1, img2)
-
-    pts1_c = deepcopy(pts1)
-    pts2_c = deepcopy(pts2)
+    img1_matches, img2_matches = feature_matching(img1, img2)
+    img1_matches_copy = deepcopy(img1_matches)
+    img2_matches_copy = deepcopy(img2_matches)
 
     H_matrices = []
-    pts1_inliers_list = []
-    pts2_inliers_list = []
+    img1_inliers_list = []
+    img2_inliers_list = []
     plane_size_list = []
 
     all_planes_extracted = False
@@ -268,24 +271,24 @@ def extract_planes(img1, img2):
 
     # Mask to remove inliners from the next iteration
     # True - Use the corresponding index, False - Do not use the corresponding index
-    mask = np.full(len(pts1_c), True)
+    mask = np.full(len(img1_matches_copy), True)
 
     print("Extracting planes from images...\n")
 
     while not all_planes_extracted:
         
-        H, pts1_inliers, pts2_inliers, mask = plane_RANSAC(pts1_c, pts2_c, mask)
+        H, img1_inliers, img2_inliers, mask = plane_RANSAC(img1_matches_copy, img2_matches_copy, mask)
 
-        plane_size_list.append(len(pts1_inliers))
+        plane_size_list.append(len(img1_inliers))
 
-        pts1_c = np.squeeze(pts1_c[np.argwhere(mask)])
-        pts2_c = np.squeeze(pts2_c[np.argwhere(mask)])
+        img1_matches_copy = np.squeeze(img1_matches_copy[np.argwhere(mask)])
+        img2_matches_copy = np.squeeze(img2_matches_copy[np.argwhere(mask)])
 
-        mask = np.full(len(pts1_c), True)
+        mask = np.full(len(img1_matches_copy), True)
 
         H_matrices.append(H)
-        pts1_inliers_list.append(pts1_inliers)
-        pts2_inliers_list.append(pts2_inliers)
+        img1_inliers_list.append(img1_inliers)
+        img2_inliers_list.append(img2_inliers)
         
         if len(mask) < extraction_threshold:
             all_planes_extracted = True 
@@ -298,18 +301,78 @@ def extract_planes(img1, img2):
 
     top_idx = np.argsort(-plane_size_list)[:2]
 
-    for idx in top_idx:
+    if show_extraction:
+        for idx in top_idx:
 
-        plt.imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
-        for point in pts1_inliers_list[idx]:
-            plt.scatter(int(point[0]), int(point[1]), c='b')
-        plt.show()
+            plt.imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
+            for point in img1_inliers_list[idx]:
+                plt.scatter(int(point[0]), int(point[1]), c='b')
+            plt.show()
 
-        plt.imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
-        for point in pts2_inliers_list[idx]:
-            plt.scatter(int(point[0]), int(point[1]), c='b')
-        plt.show()
+            plt.imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
+            for point in img2_inliers_list[idx]:
+                plt.scatter(int(point[0]), int(point[1]), c='b')
+            plt.show()
+
+    return np.array(H_matrices)[top_idx], np.array(img1_inliers_list)[top_idx], np.array(img2_inliers_list)[top_idx]
+ 
+def fit_convex_hull(img, pts, show_plane=True):
     
+    plane_points = []
+
+    hull = ConvexHull(pts)
+    plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+    for simplex in hull.simplices:
+        plt.plot(pts[simplex, 0], pts[simplex, 1], 'k-')
+    plt.show()
+
+
+    for i in range(img.shape[0]):
+        for j in range(img.shape[1]):
+            if(cv2.pointPolygonTest(pts[hull.vertices].astype(int), (j, i), False) >= 0):
+                img = cv2.circle(img, (j, i), 1, (255,0,0), 1)
+                plane_points.append((j, i))
+    
+    if show_plane:
+        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        plt.show()
+
+    return plane_points
+
+def create_dense_plane(img1, img2, img1_inliers, img2_inliers):
+    
+    dense_planes_img1 = []
+    dense_planes_img2 = []
+ 
+    for pts1, pts2 in zip(img1_inliers, img2_inliers):
+
+        # Plane in image 1
+        dense_plane = fit_convex_hull(img1, pts1, show_plane=False)
+        dense_planes_img1.append(dense_plane)
+
+        # Plane in image 2
+        dense_plane = fit_convex_hull(img2, pts2, show_plane=False)
+        dense_planes_img2.append(dense_plane)
+
+    return np.array(dense_planes_img1), np.array(dense_planes_img2)
+
+def create_3d_projection(dense_planes_img1, dense_planes_img2, M1, M2, H_matrices):
+        
+    for dense_plane_img1, dense_plane_img2, H in zip(dense_planes_img1, dense_planes_img2, H_matrices):
+
+        dense_plane_img2_homogenized = np.concatenate((dense_plane_img2, np.ones(len(dense_plane_img2)).reshape(-1,1)), axis=1)
+        dense_plane_img1_estimated = np.matmul(H, dense_plane_img2_homogenized.T)
+
+        dense_plane_img1_estimated = (dense_plane_img1_estimated/dense_plane_img1_estimated[-1]).T
+
+        pts_3D, error = triangulate(M1, dense_plane_img1_estimated[:,0:2], M2, dense_plane_img2)
+        pts_3D = pts_3D[pts_3D[:,2]>-1000]
+        pts_3D = pts_3D[pts_3D[:,2]<500]
+        plot_3D_points(pts_3D)
+    
+
+               
 def main():
 
     img_folder = '/home/nithin/Desktop/Geometry Vision/Assignments/HW2/images/input'
@@ -319,6 +382,7 @@ def main():
 
     image1 = images[-5]
     image2 = images[-1]
+
     img1 = cv2.imread(image1)
     img2 = cv2.imread(image2)
 
@@ -328,28 +392,30 @@ def main():
     # lines are of the structure (x1,x2,y1,y2,theta,r)
     lines1 = scipy.io.loadmat(lines_folder+'/'+img_name1+'.mat')['lines']
     lines2 = scipy.io.loadmat(lines_folder+'/'+img_name2+'.mat')['lines']
-
+    
     # histogram_values gives the number of sorted_lines in each bin.  
-    # clusters1 = cluster_lines(lines1)
-    # clusters2 = cluster_lines(lines2)
+    clusters1 = cluster_lines(lines1)
+    clusters2 = cluster_lines(lines2)
 
     # show_clusters(img, clusters)
-    # new_clusters1, VP1 = find_VP(clusters1)
-    # new_clusters2, VP2 = find_VP(clusters2)
+    new_clusters1, VP1 = find_VP(clusters1)
+    new_clusters2, VP2 = find_VP(clusters2)
     # show_clusters(img1, new_clusters1, points=VP1, show_point=True)
     # show_clusters(img2, new_clusters2, points=VP2, show_point=True)
 
-    # assert len(VP1) == 3, 'More than 3 cluster of lines formed.'
-    # assert len(VP2) == 3, 'More than 3 cluster of lines formed.'
+    assert len(VP1) == 3, 'More than 3 cluster of lines formed.'
+    assert len(VP2) == 3, 'More than 3 cluster of lines formed.'
 
-    # K1 = intrinsics_calibration(VP1)
-    # K2 = intrinsics_calibration(VP2)
+    K1 = intrinsics_calibration(VP1)
+    K2 = intrinsics_calibration(VP2)
 
-    # M1, M2 = extrinsic_calibration(img1, img2, K1, K2)    
-
-    extract_planes(img1, img2)
-
+    M1, M2 = extrinsic_calibration(img1, img2, K1, K2)    
     
+    H_matrices, img1_inliers, img2_inliers = extract_plane_points(img1, img2, show_extraction=False)
+
+    dense_planes_img1, dense_planes_img2 = create_dense_plane(img1, img2, img1_inliers, img2_inliers)
+
+    create_3d_projection(dense_planes_img1, dense_planes_img2, M1, M2, H_matrices)
 
 if __name__ == '__main__':
     main()
